@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>ONE'S トーナメント</title>
+<style>
+  :root { --bg:#16181d; --panel:#20232a; --line:#343843; --text:#eceef2; --sub:#9aa0ad; --acc:#3fd23f; --warn:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system, "Hiragino Sans", sans-serif; }
+  .app { display:grid; grid-template-columns: 460px 1fr; height:100vh; }
+  .side { overflow-y:auto; border-right:1px solid var(--line); background:var(--panel); }
+  .view { overflow:auto; padding:20px; display:flex; justify-content:center; align-items:flex-start; }
+  #cv { width:min(100%, calc((100vh - 40px) * 16 / 9)); height:auto; box-shadow:0 6px 30px #0008; background:#000; }
+  header { position:sticky; top:0; z-index:5; background:var(--panel); padding:12px 14px 0; border-bottom:1px solid var(--line); }
+  h1 { font-size:16px; margin:0 0 10px; }
+  .hrow { display:flex; align-items:center; gap:6px; margin-bottom:10px; }
+  .hrow h1 { margin:0; flex:1; }
+  #cv:fullscreen { width:100vw; height:100vh; object-fit:contain; background:#000; box-shadow:none; }
+  #cv:-webkit-full-screen { width:100vw; height:100vh; object-fit:contain; background:#000; }
+  #cv { cursor:zoom-in; }
+  .tabs { display:flex; gap:6px; }
+  .tabs button { flex:1; padding:9px; border:1px solid var(--line); border-bottom:none; border-radius:8px 8px 0 0; background:transparent; color:var(--sub); font-weight:700; cursor:pointer; font-size:14px; }
+  .tabs button.on { background:var(--bg); color:#fff; }
+  .subtabs { display:flex; gap:4px; padding:10px 14px 0; }
+  .subtabs button { padding:6px 12px; border-radius:20px; border:1px solid var(--line); background:transparent; color:var(--sub); cursor:pointer; font-size:13px; }
+  .subtabs button.on { background:#fff; color:#111; border-color:#fff; font-weight:700; }
+  section.pane { padding:12px 14px 40px; display:none; }
+  section.pane.on { display:block; }
+  h2 { font-size:13px; color:var(--sub); margin:18px 0 8px; font-weight:600; }
+  .card { background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; }
+  .card.los { border-color:#2f6d2f; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .badge { font-size:11px; padding:1px 7px; border-radius:10px; background:#2f6d2f; color:#c8ffc8; white-space:nowrap; }
+  .num { color:var(--sub); font-size:12px; width:34px; flex:none; }
+  input[type=text] { flex:1; min-width:0; padding:7px 9px; border-radius:7px; border:1px solid var(--line); background:#0f1115; color:#fff; font-size:15px; }
+  .thumb { width:44px; height:44px; flex:none; border-radius:6px; background:#0f1115 center/contain no-repeat; border:1px solid var(--line); cursor:pointer; }
+  .btn { padding:7px 11px; border-radius:7px; border:1px solid var(--line); background:#2b2f38; color:#fff; cursor:pointer; font-size:13px; white-space:nowrap; }
+  .btn:hover { background:#353a45; }
+  .btn.primary { background:var(--acc); border-color:var(--acc); color:#06210a; font-weight:700; }
+  .btn.danger { color:var(--warn); }
+  .btn.small { padding:4px 8px; font-size:12px; }
+  .adj { display:none; margin-top:8px; gap:6px; flex-direction:column; }
+  .card.open .adj { display:flex; }
+  .adj label { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--sub); }
+  .adj label span { width:60px; }
+  .adj input[type=range] { flex:1; }
+  .match { display:flex; align-items:stretch; gap:6px; margin-bottom:6px; }
+  .match .mid { color:var(--sub); font-size:11px; align-self:center; width:22px; text-align:center; }
+  .match button { flex:1; padding:10px 8px; border-radius:8px; border:2px solid var(--line); background:#0f1115; color:#fff; cursor:pointer; font-weight:700; font-size:14px; min-height:44px; }
+  .match button:disabled { color:#555; cursor:default; }
+  .match button.win { border-color:var(--win, #ffd400); background:color-mix(in srgb, var(--win, #ffd400) 22%, #0f1115); }
+  .match button.lose { opacity:.45; }
+  .hint { color:var(--sub); font-size:12px; margin:4px 0 8px; }
+  .field { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .field > span { width:120px; color:var(--sub); font-size:13px; flex:none; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#fff; color:#111; padding:10px 18px; border-radius:24px; font-weight:700; opacity:0; transition:.25s; pointer-events:none; z-index:9; }
+  .toast.show { opacity:1; }
+  .champ { margin:10px 0; padding:10px; border-radius:10px; text-align:center; background:#0f1115; border:1px dashed var(--line); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <header>
+      <div class="hrow"><h1>ONE'S FINAL トーナメント作成</h1>
+        <button class="btn small" id="fsBtn" title="この画面で全画面（Fキー／表をダブルクリックでも可。Escで戻る）">⛶ 全画面</button>
+        <button class="btn small" id="dispBtn" title="プロジェクター等に出す別ウィンドウを開く">表示用ウィンドウ</button></div>
+      <div class="tabs" id="secTabs"></div>
+    </header>
+    <div class="subtabs" id="paneTabs">
+      <button data-p="players" class="on">選手</button>
+      <button data-p="results">勝敗</button>
+      <button data-p="design">デザイン</button>
+      <button data-p="export">書き出し・保存</button>
+    </div>
+
+    <section class="pane on" id="p-players">
+      <p class="hint">名前の途中に「/」を入れると、その位置で2行になります（例：NAO/AKAGAMI）。入れなければ、長い名前は自動で縮めるか2行にします。<br>写真の四角をクリックで画像を選択。「調整」で大きさ・位置を変えられます。</p>
+      <h2>左ブロック（上から）</h2>
+      <div id="listL"></div>
+      <h2>右ブロック（上から）</h2>
+      <div id="listR"></div>
+    </section>
+
+    <section class="pane" id="p-results">
+      <p class="hint">勝った選手をクリック。もう一度クリックで取り消し。前の試合を変えると、その先の結果はリセットされます。</p>
+      <div id="matches"></div>
+    </section>
+
+    <section class="pane" id="p-design">
+      <h2>勝ち上がり</h2>
+      <div class="field"><span>勝ち線の色</span><input type="color" id="winColor"></div>
+      <div class="field"><span>文字</span><label><input type="checkbox" id="italic"> 斜体（タイトル・LAST ONE'S SELECTION）</label></div>
+      <div class="field"><span>負けた選手</span><label><input type="checkbox" id="dimLosers"> 暗くする</label></div>
+      <div class="field"><span>優勝者</span><label><input type="checkbox" id="showChamp"> 決勝の勝者を中央上に出す</label></div>
+      <div class="field"><span>優勝の見出し</span><input type="text" id="champLabel" placeholder="CHAMPION"></div>
+      <h2>背景・ロゴ（全部門共通）</h2>
+      <p class="hint">1920×1080px 推奨。背景は一番下、前面画像（ロゴ・日付帯など、透過PNG）は一番上に重ねます。</p>
+      <div class="field"><span>背景画像</span><button class="btn" data-pick="bg">選択</button><button class="btn danger small" data-clear="bg">外す</button><span id="bgState" class="hint"></span></div>
+      <div class="field"><span>前面画像</span><button class="btn" data-pick="overlay">選択</button><button class="btn danger small" data-clear="overlay">外す</button><span id="overlayState" class="hint"></span></div>
+      <h2>タイトル文字</h2>
+      <div class="field"><span>表示</span><label><input type="checkbox" id="showTitle"> タイトルを描く</label></div>
+      <div class="field"><span>1行目（共通）</span><input type="text" id="titleTop"></div>
+      <div class="field"><span>2行目（共通）</span><input type="text" id="titleMain"></div>
+      <div class="field"><span>3行目（この部門）</span><input type="text" id="titleSub"></div>
+    </section>
+
+    <section class="pane" id="p-export">
+      <h2>画像の書き出し（PNG 1920×1080）</h2>
+      <div class="row" style="flex-wrap:wrap">
+        <button class="btn primary" id="exportOne">この部門を書き出し</button>
+        <button class="btn" id="exportAll">MEN'S・WOMEN'S 両方</button>
+      </div>
+      <h2>データ</h2>
+      <p class="hint">入力内容はこのブラウザに自動保存されます。別のMacやブラウザに移すときは「データを書き出し」で .json を作り、移動先で「データを読み込み」してください。</p>
+      <div class="row" style="flex-wrap:wrap">
+        <button class="btn" id="saveJson">データを書き出し (.json)</button>
+        <button class="btn" id="loadJson">データを読み込み</button>
+      </div>
+      <h2>リセット</h2>
+      <div class="row" style="flex-wrap:wrap">
+        <button class="btn danger" id="resetWin">この部門の勝敗を全部消す</button>
+        <button class="btn danger" id="resetAll">すべて初期データに戻す</button>
+      </div>
+    </section>
+  </aside>
+  <main class="view"><canvas id="cv" width="1920" height="1080"></canvas></main>
+</div>
+<div class="toast" id="toast"></div>
+<input type="file" id="filePick" accept="image/*" hidden>
+<input type="file" id="jsonPick" accept=".json,application/json" hidden>
+
+<script src="data/default_data.js"></script>
+<script src="data/fonts.js"></script>
+<script>
+'use strict';
+// ====== 定数（キャンバス 1920×1080） ======
+const W = 1920, H = 1080;
+const BOX_W = 400, BOX_H = 96, LX = 64, RX = W - LX - BOX_W;
+const ROW_Y = [118, 266, 414, 562, 710, 858];
+const LOS_SLOTS = [0, 5, 6, 11];
+const LOS_TEXT = "LAST ONE'S SELECTION";
+const FONT = "'ONES EN', 'ONES JA', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', sans-serif";
+const LINE_W = 3, WIN_W = 7;
+
+// ====== 状態 ======
+let state, cur = 'mens';
+const imgCache = new Map();
+const clone = o => JSON.parse(JSON.stringify(o));
+
+// ====== 保存（IndexedDB、使えなければ localStorage） ======
+const DB = {
+  db: null,
+  async open() {
+    if (this.db) return this.db;
+    return this.db = await new Promise((res, rej) => {
+      setTimeout(() => rej(new Error('timeout')), 1500);
+      const r = indexedDB.open('ones-tournament', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  },
+  async get() {
+    try { const db = await this.open();
+      return await new Promise((res, rej) => { const q = db.transaction('kv').objectStore('kv').get('state'); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); });
+    } catch (e) { try { const s = localStorage.getItem('ones-tournament'); return s ? JSON.parse(s) : null; } catch (e2) { return null; } }
+  },
+  async set(v) {
+    try { const db = await this.open();
+      await new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, 'state'); t.oncomplete = res; t.onerror = () => rej(t.error); });
+    } catch (e) { try { localStorage.setItem('ones-tournament', JSON.stringify(v)); } catch (e2) { toast('自動保存できませんでした。書き出し・保存タブから .json を保存してください'); } }
+  },
+};
+let saveTimer;
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => DB.set(state), 300); }
+
+// ====== トーナメントの形 ======
+// 各ブロック：m1=2v3 → m2=1 v W(m1)、m3=4v5 → m4=W(m3) v 6、m5=W(m2) v W(m4)、F=決勝
+function buildTree() {
+  const T = {};
+  for (const s of ['L', 'R']) {
+    const off = s === 'L' ? 0 : 6;
+    const mx = x => s === 'L' ? x : W - x;
+    const slot = r => ({ type: 'slot', idx: off + r, out: [mx(LX + BOX_W), ROW_Y[r] + BOX_H / 2] });
+    const m = (id, x, a, b, round) => {
+      const y = (a.out[1] + b.out[1]) / 2;
+      return T[s + id] = { type: 'match', id: s + id, x: mx(x), kids: [a, b], out: [mx(x), y], round, side: s };
+    };
+    const m1 = m(1, 525, slot(1), slot(2), 1);
+    const m3 = m(3, 525, slot(3), slot(4), 1);
+    const m2 = m(2, 595, slot(0), m1, 2);
+    const m4 = m(4, 595, m3, slot(5), 2);
+    m(5, 675, m2, m4, 3);
+  }
+  T.F = { type: 'final', id: 'F', kids: [T.L5, T.R5], round: 4, out: [W / 2, T.L5.out[1]], top: T.L5.out[1] - 160 };
+  return T;
+}
+const TREE = buildTree();
+const MATCH_ORDER = [
+  ['1回戦', ['L1', 'L3', 'R1', 'R3']],
+  ['BEST 8', ['L2', 'L4', 'R2', 'R4']],
+  ['準決勝', ['L5', 'R5']],
+  ['決勝', ['F']],
+];
+const parentOf = {};
+for (const k in TREE) for (const c of TREE[k].kids) if (c.type !== 'slot') parentOf[c.id] = k;
+
+const sec = () => state.sections[cur];
+// ノードの勝ち上がり選手番号（未確定は null）
+function entrant(node, S = sec()) {
+  if (node.type === 'slot') return node.idx;
+  const w = S.winners[node.id];
+  return w === undefined ? null : entrant(node.kids[w], S);
+}
+function eliminated(S) {
+  const out = new Set();
+  for (const k in TREE) {
+    const w = S.winners[k]; if (w === undefined) continue;
+    const l = entrant(TREE[k].kids[1 - w], S); if (l !== null) out.add(l);
+  }
+  return out;
+}
+const isLosEmpty = (S, i) => LOS_SLOTS.includes(i) && !S.players[i].name.trim();
+
+// ====== 画像 ======
+function loadImg(src) {
+  if (!src) return Promise.resolve(null);
+  if (imgCache.has(src)) return imgCache.get(src);
+  const p = new Promise(res => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+  imgCache.set(src, p); return p;
+}
+// 選んだ画像：透過の余白を切って高さ600pxに縮小
+function processPhoto(file, maxH = 600, crop = true) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => { const im = new Image(); im.onload = () => {
+      const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const x = c.getContext('2d'); x.drawImage(im, 0, 0);
+      let bx = 0, by = 0, bw = im.width, bh = im.height;
+      if (crop) {
+        const d = x.getImageData(0, 0, im.width, im.height).data;
+        let x0 = im.width, y0 = im.height, x1 = -1, y1 = -1;
+        for (let yy = 0; yy < im.height; yy += 2) for (let xx = 0; xx < im.width; xx += 2) {
+          if (d[(yy * im.width + xx) * 4 + 3] > 8) { if (xx < x0) x0 = xx; if (xx > x1) x1 = xx; if (yy < y0) y0 = yy; if (yy > y1) y1 = yy; }
+        }
+        if (x1 > 0) { bx = x0; by = y0; bw = Math.min(im.width - x0, x1 - x0 + 2); bh = Math.min(im.height - y0, y1 - y0 + 2); }
+      }
+      const sc = Math.min(1, maxH / bh);
+      const o = document.createElement('canvas'); o.width = Math.round(bw * sc); o.height = Math.round(bh * sc);
+      o.getContext('2d').drawImage(c, bx, by, bw, bh, 0, 0, o.width, o.height);
+      let url = o.toDataURL('image/webp', 0.9);
+      if (!url.startsWith('data:image/webp')) url = o.toDataURL('image/png');
+      res(url);
+    }; im.onerror = rej; im.src = fr.result; };
+    fr.onerror = rej; fr.readAsDataURL(file);
+  });
+}
+
+// ====== 描画 ======
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let drawSeq = 0;
+async function render(target = ctx, secKey = cur) {
+  const seq = target === ctx ? ++drawSeq : 0;
+  const S = state.sections[secKey], st = state.settings;
+  const imgs = await Promise.all([loadImg(st.bg), loadImg(st.overlay), loadImg(st.logo), ...S.players.map(p => loadImg(p.photo))]);
+  if (target === ctx && seq !== drawSeq) return;
+  const [bg, ov, logo, ...photos] = imgs;
+  const g = target;
+  g.save(); g.clearRect(0, 0, W, H);
+  // 背景
+  if (bg) drawCover(g, bg); else placeholderBg(g);
+  // 線
+  drawLines(g, S, st);
+  // 枠
+  const out = st.dimLosers ? eliminated(S) : new Set();
+  for (let i = 0; i < 12; i++) drawBox(g, S, i, photos[i], out.has(i));
+  // 優勝者
+  const champ = entrant(TREE.F, S);
+  if (champ !== null && st.showChamp !== false) {
+    const cb = champRect();
+    drawBox(g, S, champ, photos[champ], false, cb, st.winColor);
+    g.save(); g.font = `bold 50px ${FONT}`; g.fillStyle = st.winColor; g.textAlign = 'center';
+    g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 10;
+    g.translate(W / 2, cb.y - 16); italic(g); g.fillText(st.champLabel || 'CHAMPION', 0, 0); g.restore();
+  }
+  // タイトル
+  if (st.showTitle) drawTitle(g, st, S);
+  // ロゴは SECTION の下（上下に余白）
+  if (logo) { const top = 852, lh = H - top - 36, lw = logo.width * lh / logo.height; g.drawImage(logo, W / 2 - lw / 2, top, lw, lh); }
+  if (ov) g.drawImage(ov, 0, 0, W, H);
+  g.restore();
+  if (target === ctx) mirrorDisplay();
+}
+function drawCover(g, im) {
+  const sc = Math.max(W / im.width, H / im.height);
+  const w = im.width * sc, h = im.height * sc;
+  g.drawImage(im, (W - w) / 2, (H - h) / 2, w, h);
+}
+function placeholderBg(g) {
+  const gr = g.createLinearGradient(0, 0, W, 0);
+  gr.addColorStop(0, '#0d2a6b'); gr.addColorStop(.5, '#090b1f'); gr.addColorStop(1, '#6b0d14');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  const r = g.createRadialGradient(W / 2, 480, 20, W / 2, 480, 620);
+  r.addColorStop(0, 'rgba(160,120,255,.35)'); r.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = r; g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(255,255,255,.35)';
+  g.font = `bold 24px ${FONT}`; g.textAlign = 'center';
+  g.fillText('（背景画像は「デザイン」タブから設定）', W / 2, H - 40);
+}
+function seg(g, x1, y1, x2, y2) { g.moveTo(x1, y1); g.lineTo(x2, y2); }
+function drawLines(g, S, st) {
+  const base = [], win = [];
+  for (const k in TREE) {
+    const n = TREE[k], w = S.winners[k];
+    if (n.type === 'final') {
+      n.kids.forEach((c, i) => (w === i ? win : base).push([c.out[0], c.out[1], n.out[0], n.out[1]]));
+      (w !== undefined ? win : base).push([n.out[0], n.out[1], n.out[0], n.top]);
+      continue;
+    }
+    n.kids.forEach((c, i) => {
+      const arr = w === i ? win : base;
+      arr.push([c.out[0], c.out[1], n.x, c.out[1]]);
+      arr.push([n.x, c.out[1], n.x, n.out[1]]);
+    });
+  }
+  g.lineCap = 'square'; g.lineJoin = 'miter';
+  g.strokeStyle = '#fff'; g.lineWidth = LINE_W;
+  g.beginPath(); base.forEach(s => seg(g, ...s)); g.stroke();
+  if (win.length) {
+    g.save();
+    g.shadowColor = st.winColor; g.shadowBlur = 18;
+    g.strokeStyle = st.winColor; g.lineWidth = WIN_W;
+    g.beginPath(); win.forEach(s => seg(g, ...s)); g.stroke();
+    g.shadowBlur = 0; g.stroke();
+    g.restore();
+  }
+}
+function champRect() { return { x: W / 2 - BOX_W / 2, y: TREE.F.top - BOX_H, w: BOX_W, h: BOX_H, left: true }; }
+function boxRect(i) { return { x: i < 6 ? LX : RX, y: ROW_Y[i % 6], w: BOX_W, h: BOX_H, left: i < 6 }; }
+function drawBox(g, S, i, photo, out, b = boxRect(i), champ = null) {
+  const p = S.players[i];
+  g.save();
+  if (!champ && isLosEmpty(S, i)) {
+    const gr = g.createLinearGradient(b.x, b.y, b.x + b.w, b.y + b.h);
+    gr.addColorStop(0, '#2fd12f'); gr.addColorStop(1, '#5fe85a');
+    g.fillStyle = gr; g.fillRect(b.x, b.y, b.w, b.h);
+    g.strokeStyle = '#fff'; g.lineWidth = 3; g.strokeRect(b.x + 1.5, b.y + 1.5, b.w - 3, b.h - 3);
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    let fs = 50; g.font = `bold ${fs}px ${FONT}`;
+    const tw = g.measureText(LOS_TEXT).width, max = b.w - 40;
+    g.shadowColor = 'rgba(0,80,0,.45)'; g.shadowBlur = 6;
+    g.translate(b.x + b.w / 2, b.y + b.h / 2 + capH(g, fs) / 2); italic(g);
+    if (tw > max) g.scale(max / tw, 1);
+    g.fillText(LOS_TEXT, 0, 0);
+    g.restore(); return;
+  }
+  // 箱
+  if (champ) { g.save(); g.shadowColor = champ; g.shadowBlur = 30; g.fillStyle = 'rgba(8,10,18,.9)'; g.fillRect(b.x, b.y, b.w, b.h); g.restore(); }
+  else { g.fillStyle = 'rgba(8,10,18,.78)'; g.fillRect(b.x, b.y, b.w, b.h); }
+  // 写真（枠の内側に収めて切る）
+  if (photo) {
+    g.save();
+    if (out) g.globalAlpha = 0.4;
+    g.beginPath(); g.rect(b.x + 3, b.y + 3, b.w - 6, b.h - 6); g.clip();
+    const sc = p.scale || 1;
+    const ph = 200 * sc, pw = photo.width * ph / photo.height;
+    const cx = (b.left ? b.x + 104 : b.x + b.w - 104) + (p.dx || 0);
+    const top = b.y + 4 + (p.dy || 0);
+    g.drawImage(photo, cx - pw / 2, top, pw, ph);
+    g.restore();
+  }
+  // 名前
+  if (out) { g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(b.x, b.y, b.w, b.h); g.globalAlpha = 0.45; }
+  drawName(g, p.name, b);
+  g.globalAlpha = 1;
+  const bw = champ ? 5 : 3;
+  g.strokeStyle = champ || '#fff'; g.lineWidth = bw; g.strokeRect(b.x + bw / 2, b.y + bw / 2, b.w - bw, b.h - bw);
+  g.restore();
+}
+const ITALIC = -0.12;
+function italic(g) { if (state.settings.italic !== false) g.transform(1, 0, ITALIC, 1, 0, 0); }
+// data/fonts.js の埋め込みフォントを登録
+async function loadEmbedFonts() {
+  for (const f of window.EMBED_FONTS || []) {
+    const bin = atob(f.data), buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    const ff = new FontFace(f.family, buf.buffer, { weight: '100 900' });
+    await ff.load(); document.fonts.add(ff);
+  }
+}
+function capH(g, fs) { const m = g.measureText('H'); return m.actualBoundingBoxAscent || fs * 0.72; }
+function drawName(g, name, b) {
+  name = (name || '').trim(); if (!name) return;
+  const maxW = 250;
+  const fit = (t, fs) => { g.font = `bold ${fs}px ${FONT}`; return g.measureText(t).width; };
+  let lines, fs;
+  if (name.includes('/')) { lines = name.split('/').map(s => s.trim()).filter(Boolean).slice(0, 2); fs = lines.length > 1 ? 47 : 62; }
+  else {
+    lines = [name]; fs = 62;
+    while (fs > 50 && fit(name, fs) > maxW) fs -= 2;
+    if (fit(name, fs) > maxW && name.includes(' ')) {
+      const words = name.split(/\s+/); let best = null;
+      for (let k = 1; k < words.length; k++) { const a = words.slice(0, k).join(' '), c = words.slice(k).join(' ');
+        const m = Math.max(fit(a, 47), fit(c, 47)); if (!best || m < best.m) best = { m, l: [a, c] }; }
+      lines = best.l; fs = 47;
+    }
+  }
+  g.save();
+  g.fillStyle = '#fff'; g.textBaseline = 'alphabetic';
+  g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 8;
+  g.font = `bold ${fs}px ${FONT}`;
+  const ch = capH(g, fs), gap = fs * 0.12;
+  const total = lines.length * ch + (lines.length - 1) * gap;
+  let y = b.y + b.h / 2 - total / 2 + ch + 2;
+  const ax = b.left ? b.x + b.w - 20 : b.x + 24;
+  for (const t of lines) {
+    const tw = g.measureText(t).width;
+    g.save(); g.translate(ax, y);
+    if (tw > maxW) g.scale(maxW / tw, 1);
+    g.textAlign = b.left ? 'right' : 'left';
+    g.fillText(t, 0, 0); g.restore();
+    y += ch + gap;
+  }
+  g.restore();
+}
+function drawTitle(g, st, S) {
+  const t = (txt, fs, y) => {
+    if (!txt) return;
+    g.save(); g.font = `bold ${fs}px ${FONT}`; g.fillStyle = '#fff'; g.textAlign = 'center';
+    g.shadowColor = 'rgba(0,0,0,.55)'; g.shadowBlur = 14;
+    g.translate(W / 2, y); italic(g);
+    const tw = g.measureText(txt).width; if (tw > 520) g.scale(520 / tw, 1);
+    g.fillText(txt, 0, 0); g.restore();
+  };
+  t(st.titleTop, 66, 636);
+  t(st.titleMain, 128, 754);
+  t(S.sub, 44, 814);
+}
+
+// ====== UI ======
+const $ = id => document.getElementById(id);
+let toastTimer;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200); }
+function changed(full = false) { save(); render(); if (full) buildUI(); else { buildMatches(); } }
+
+function buildTabs() {
+  $('secTabs').innerHTML = '';
+  for (const k of Object.keys(state.sections)) {
+    const b = document.createElement('button'); b.textContent = state.sections[k].label;
+    b.className = k === cur ? 'on' : ''; b.onclick = () => { cur = k; buildUI(); render(); };
+    $('secTabs').appendChild(b);
+  }
+}
+function slotLabel(i) { const s = i < 6 ? '左' : '右'; return `${s}${(i % 6) + 1}`; }
+function buildPlayers() {
+  const S = sec();
+  for (const [el, from] of [[$('listL'), 0], [$('listR'), 6]]) {
+    el.innerHTML = '';
+    for (let i = from; i < from + 6; i++) {
+      const p = S.players[i], los = LOS_SLOTS.includes(i);
+      const c = document.createElement('div'); c.className = 'card' + (los ? ' los' : '');
+      c.innerHTML = `
+        <div class="row">
+          <span class="num">${slotLabel(i)}</span>
+          <div class="thumb" title="写真を選ぶ"></div>
+          <input type="text" placeholder="${los ? '最終予選の勝者（空欄＝LAST ONE\'S SELECTION）' : '選手名'}">
+          <button class="btn small" data-a="adj">調整</button>
+        </div>
+        ${los ? '<div style="margin:6px 0 0 42px"><span class="badge">LAST ONE\'S SELECTION 枠</span></div>' : ''}
+        <div class="adj">
+          <label><span>大きさ</span><input type="range" min="0.5" max="2" step="0.01" data-k="scale"></label>
+          <label><span>左右</span><input type="range" min="-200" max="200" step="1" data-k="dx"></label>
+          <label><span>上下</span><input type="range" min="-150" max="150" step="1" data-k="dy"></label>
+          <div class="row"><button class="btn small" data-a="pick">写真を変更</button><button class="btn small danger" data-a="rm">写真を外す</button><button class="btn small" data-a="resetAdj">位置を戻す</button></div>
+        </div>`;
+      const th = c.querySelector('.thumb'); th.style.backgroundImage = p.photo ? `url(${p.photo})` : '';
+      if (!p.photo) th.textContent = '';
+      const inp = c.querySelector('input[type=text]'); inp.value = p.name;
+      inp.oninput = () => { p.name = inp.value; save(); render(); buildMatches(); };
+      c.querySelectorAll('input[type=range]').forEach(r => { r.value = p[r.dataset.k] ?? (r.dataset.k === 'scale' ? 1 : 0);
+        r.oninput = () => { p[r.dataset.k] = +r.value; save(); render(); }; });
+      const pick = () => pickFile(async f => { p.photo = await processPhoto(f); changed(true); toast('写真を入れました'); });
+      th.onclick = pick;
+      c.querySelector('[data-a=pick]').onclick = pick;
+      c.querySelector('[data-a=rm]').onclick = () => { p.photo = null; changed(true); };
+      c.querySelector('[data-a=resetAdj]').onclick = () => { p.scale = 1; p.dx = 0; p.dy = 0; changed(true); };
+      c.querySelector('[data-a=adj]').onclick = () => c.classList.toggle('open');
+      el.appendChild(c);
+    }
+  }
+}
+function nameOf(i, S = sec()) {
+  if (i === null) return null;
+  if (isLosEmpty(S, i)) return null;
+  return S.players[i].name.replace(/\//g, ' ').trim() || null;
+}
+function clearUp(id) { const S = sec(); let p = parentOf[id]; while (p) { delete S.winners[p]; p = parentOf[p]; } }
+function buildMatches() {
+  const S = sec(), el = $('matches'); el.innerHTML = '';
+  document.documentElement.style.setProperty('--win', state.settings.winColor);
+  const champ = entrant(TREE.F);
+  if (champ !== null) { const d = document.createElement('div'); d.className = 'champ'; d.innerHTML = `🏆 優勝：<b>${nameOf(champ) ?? ''}</b>`; el.appendChild(d); }
+  for (const [title, ids] of MATCH_ORDER) {
+    const h = document.createElement('h2'); h.textContent = title; el.appendChild(h);
+    for (const id of ids) {
+      const n = TREE[id], w = S.winners[id];
+      const row = document.createElement('div'); row.className = 'match';
+      const ents = n.kids.map(k => entrant(k));
+      const names = ents.map(e => e === null ? null : nameOf(e));
+      const ready = names.every(Boolean);
+      names.forEach((nm, i) => {
+        if (i === 1) { const m = document.createElement('span'); m.className = 'mid'; m.textContent = 'vs'; row.appendChild(m); }
+        const b = document.createElement('button');
+        b.textContent = nm ?? (ents[i] !== null && isLosEmpty(S, ents[i]) ? '最終予選枠（未入力）' : '未定');
+        b.disabled = !ready;
+        if (w !== undefined) b.className = w === i ? 'win' : 'lose';
+        b.onclick = () => { if (S.winners[id] === i) delete S.winners[id]; else S.winners[id] = i; clearUp(id); changed(); };
+        row.appendChild(b);
+      });
+      el.appendChild(row);
+    }
+  }
+}
+function buildDesign() {
+  const st = state.settings;
+  $('winColor').value = st.winColor; $('italic').checked = st.italic !== false; $('showChamp').checked = st.showChamp !== false; $('champLabel').value = st.champLabel ?? 'CHAMPION'; $('dimLosers').checked = st.dimLosers; $('showTitle').checked = st.showTitle;
+  $('titleTop').value = st.titleTop; $('titleMain').value = st.titleMain; $('titleSub').value = sec().sub;
+  $('bgState').textContent = st.bg ? '設定済み' : '未設定'; $('overlayState').textContent = st.overlay ? '設定済み' : '未設定';
+}
+function buildUI() { buildTabs(); buildPlayers(); buildMatches(); buildDesign(); }
+
+// ====== 全画面・表示用ウィンドウ ======
+function goFullscreen(el) {
+  const d = el.ownerDocument;
+  if (d.fullscreenElement || d.webkitFullscreenElement) return (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+  (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+}
+$('fsBtn').onclick = () => goFullscreen(cv);
+cv.ondblclick = () => goFullscreen(cv);
+document.addEventListener('keydown', e => {
+  if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) goFullscreen(cv);
+});
+let disp = null;
+function mirrorDisplay() {
+  if (!disp || disp.closed) return;
+  try { const c = disp.document.getElementById('c'); if (c) c.getContext('2d').drawImage(cv, 0, 0); } catch (e) {}
+}
+$('dispBtn').onclick = () => {
+  if (disp && !disp.closed) { disp.focus(); return; }
+  disp = window.open('', 'ones_display', 'width=1280,height=720');
+  if (!disp) { toast('ポップアップがブロックされました。ブラウザで許可してください'); return; }
+  disp.document.open();
+  disp.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>ONE'S トーナメント表示</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh;object-fit:contain;cursor:none}
+#h{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);color:#fff;background:#000a;padding:10px 18px;border-radius:24px;font:600 15px -apple-system,sans-serif;transition:opacity .6s}</style></head>
+<body><canvas id="c" width="${W}" height="${H}"></canvas><div id="h">ダブルクリック／Fキーで全画面（Escで戻る）</div>
+<script>
+const c=document.getElementById('c');
+function fs(){ if(document.fullscreenElement||document.webkitFullscreenElement) (document.exitFullscreen||document.webkitExitFullscreen).call(document); else (c.requestFullscreen||c.webkitRequestFullscreen).call(c); }
+c.ondblclick=fs; document.onkeydown=e=>{ if(e.key==='f'||e.key==='F') fs(); };
+setTimeout(()=>document.getElementById('h').style.opacity=0,4000);
+<\/script></body></html>`);
+  disp.document.close();
+  setTimeout(mirrorDisplay, 50);
+  toast('表示用ウィンドウを開きました。プロジェクター側へ移動してダブルクリックで全画面');
+};
+window.addEventListener('beforeunload', () => { if (disp && !disp.closed) disp.close(); });
+
+let pickCb;
+function pickFile(cb) { pickCb = cb; $('filePick').value = ''; $('filePick').click(); }
+$('filePick').onchange = e => { const f = e.target.files[0]; if (f && pickCb) pickCb(f).catch(() => toast('画像を読み込めませんでした')); };
+
+document.querySelectorAll('#paneTabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#paneTabs button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('section.pane').forEach(p => p.classList.toggle('on', p.id === 'p-' + b.dataset.p));
+});
+$('winColor').oninput = e => { state.settings.winColor = e.target.value; changed(); };
+$('showChamp').onchange = e => { state.settings.showChamp = e.target.checked; changed(); };
+$('champLabel').oninput = e => { state.settings.champLabel = e.target.value; save(); render(); };
+$('italic').onchange = e => { state.settings.italic = e.target.checked; changed(); };
+$('dimLosers').onchange = e => { state.settings.dimLosers = e.target.checked; changed(); };
+$('showTitle').onchange = e => { state.settings.showTitle = e.target.checked; changed(); };
+$('titleTop').oninput = e => { state.settings.titleTop = e.target.value; save(); render(); };
+$('titleMain').oninput = e => { state.settings.titleMain = e.target.value; save(); render(); };
+$('titleSub').oninput = e => { sec().sub = e.target.value; save(); render(); };
+document.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => pickFile(async f => {
+  state.settings[b.dataset.pick] = await processPhoto(f, 2000, false); changed(true); toast('画像を設定しました');
+}));
+document.querySelectorAll('[data-clear]').forEach(b => b.onclick = () => { state.settings[b.dataset.clear] = null; changed(true); });
+
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+async function exportSec(k) {
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  await render(c.getContext('2d'), k);
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const label = state.sections[k].label.replace(/[^A-Z]/gi, '');
+  download(blob, `ONES_FINAL_TOURNAMENT_${label}.png`);
+}
+$('exportOne').onclick = async () => { await exportSec(cur); toast('書き出しました'); };
+$('exportAll').onclick = async () => { for (const k of Object.keys(state.sections)) { await exportSec(k); await new Promise(r => setTimeout(r, 400)); } toast('2枚書き出しました'); };
+$('saveJson').onclick = () => {
+  const d = new Date(), ts = `${d.getMonth() + 1}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  download(new Blob([JSON.stringify(state)], { type: 'application/json' }), `ONES_tournament_${ts}.json`);
+};
+$('loadJson').onclick = () => { $('jsonPick').value = ''; $('jsonPick').click(); };
+$('jsonPick').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const d = JSON.parse(await f.text()); if (!d.sections || !d.settings) throw 0;
+    state = d; changed(true); toast('読み込みました'); } catch { toast('読み込めないファイルです'); }
+};
+$('resetWin').onclick = () => { if (confirm(`${sec().label} の勝敗をすべて消しますか？`)) { sec().winners = {}; changed(); } };
+$('resetAll').onclick = () => { if (confirm('選手・写真・勝敗・デザインをすべて初期データに戻しますか？（元に戻せません）')) { state = clone(window.DEFAULT_DATA); changed(true); } };
+
+(async () => {
+  const saved = await DB.get();
+  state = saved && saved.sections ? saved : clone(window.DEFAULT_DATA);
+  // 背景・ロゴは初期データのものを使う／名前の修正を反映
+  for (const k of ['bg', 'logo']) if (!state.settings[k] || state.settings.assetVer !== window.DEFAULT_DATA.settings.assetVer) state.settings[k] = window.DEFAULT_DATA.settings[k];
+  state.settings.assetVer = window.DEFAULT_DATA.settings.assetVer;
+  for (const S of Object.values(state.sections)) for (const p of S.players) if (p.name === 'まさまさまっと') p.name = 'まさまさまっど';
+  buildUI();
+  try { await loadEmbedFonts(); await document.fonts.load(`bold 60px 'DIN Condensed'`); } catch (e) { console.error(e); }
+  render();
+})();
+</script>
+</body>
+</html>
