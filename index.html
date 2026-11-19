@@ -64,6 +64,12 @@
   .field > span { width:120px; color:var(--sub); font-size:13px; flex:none; }
   .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#fff; color:#111; padding:10px 18px; border-radius:24px; font-weight:700; opacity:0; transition:.25s; pointer-events:none; z-index:9; }
   .toast.show { opacity:1; }
+  body.display { background:#000; overflow:hidden; }
+  body.display .side { display:none; }
+  body.display .app { display:block; }
+  body.display .view { padding:0; height:100vh; align-items:center; overflow:hidden; }
+  body.display #cv { width:100vw; height:100vh; object-fit:contain; box-shadow:none; cursor:none; }
+  #dispHint { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); color:#fff; background:#000a; padding:10px 18px; border-radius:24px; font:600 15px -apple-system,sans-serif; transition:opacity .6s; pointer-events:none; }
   .champ { margin:10px 0; padding:10px; border-radius:10px; text-align:center; background:#0f1115; border:1px dashed var(--line); }
 </style>
 </head>
@@ -162,6 +168,13 @@ const LINE_W = 3, WIN_W = 7;
 
 // ====== 状態 ======
 let state, cur = 'mens';
+// 表示用ウィンドウ（?display）…表だけを出す。操作はどのタブからでも反映
+const DISPLAY = new URLSearchParams(location.search).has('display');
+if (DISPLAY) { const k = new URLSearchParams(location.search).get('sec'); if (k) cur = k; }
+// 同じブラウザのタブ・ウィンドウ間で入力を即時共有（ネットなしでも動く）
+const TAB_ID = Math.random().toString(36).slice(2);
+const BC = (() => { try { return new BroadcastChannel('ones-tournament'); } catch (e) { return null; } })();
+function bcSend(msg) { if (BC) try { BC.postMessage({ ...msg, from: TAB_ID }); } catch (e) {} }
 const imgCache = new Map();
 const clone = o => JSON.parse(JSON.stringify(o));
 
@@ -190,7 +203,12 @@ const DB = {
   },
 };
 let saveTimer;
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => DB.set(state), 300); schedulePush(); }
+function save() {
+  if (DISPLAY) return;
+  clearTimeout(saveTimer); saveTimer = setTimeout(() => { DB.set(state); bcSend({ type: 'state', state, view: cur }); }, 300); schedulePush();
+}
+// 表示用ウィンドウに今の部門を知らせる
+const sendView = () => { if (!DISPLAY) bcSend({ type: 'view', view: cur }); };
 
 // ====== トーナメントの形 ======
 // 各ブロック：m1=2v3 → m2=1 v W(m1)、m3=4v5 → m4=W(m3) v 6、m5=W(m2) v W(m4)、F=決勝
@@ -288,6 +306,7 @@ function ensureLos(st) {
   if (!st.sections.los_mens) st.sections.los_mens = newLosSection("MEN'S");
   if (!st.sections.los_womens) st.sections.los_womens = newLosSection("WOMEN'S");
   if (st.settings.losTitleTop === undefined) st.settings.losTitleTop = "LAST ONE'S SELECTION";
+  for (const k of ['los_mens', 'los_womens']) st.sections[k].kind = 'los';
   return st;
 }
 let mode = 'final';
@@ -399,7 +418,6 @@ async function render(target = ctx, secKey = cur) {
   if (logo) { const top = 852, lh = H - top - 36, lw = logo.width * lh / logo.height; g.drawImage(logo, W / 2 - lw / 2, top, lw, lh); }
   if (ov) g.drawImage(ov, 0, 0, W, H);
   g.restore();
-  if (target === ctx) mirrorDisplay();
 }
 function drawCover(g, im) {
   const sc = Math.max(W / im.width, H / im.height);
@@ -559,7 +577,7 @@ function buildTabs() {
   $('secTabs').innerHTML = '';
   for (const k of keysOfMode(mode)) {
     const b = document.createElement('button'); b.textContent = state.sections[k].label;
-    b.className = k === cur ? 'on' : ''; b.onclick = () => { cur = k; lastCur[mode] = k; buildUI(); render(); };
+    b.className = k === cur ? 'on' : ''; b.onclick = () => { cur = k; lastCur[mode] = k; buildUI(); render(); sendView(); };
     $('secTabs').appendChild(b);
   }
 }
@@ -678,30 +696,30 @@ document.addEventListener('keydown', e => {
   if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) goFullscreen(cv);
 });
 let disp = null;
-function mirrorDisplay() {
-  if (!disp || disp.closed) return;
-  try { const c = disp.document.getElementById('c'); if (c) c.getContext('2d').drawImage(cv, 0, 0); } catch (e) {}
-}
 $('dispBtn').onclick = () => {
-  if (disp && !disp.closed) { disp.focus(); return; }
-  disp = window.open('', 'ones_display', 'width=1280,height=720');
+  if (disp && !disp.closed) { disp.focus(); sendView(); return; }
+  clearTimeout(saveTimer); DB.set(state);
+  disp = window.open(location.href.split(/[?#]/)[0] + '?display=1&sec=' + encodeURIComponent(cur), 'ones_display', 'width=1280,height=720');
   if (!disp) { toast('ポップアップがブロックされました。ブラウザで許可してください'); return; }
-  disp.document.open();
-  disp.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>ONE'S トーナメント表示</title>
-<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block;width:100vw;height:100vh;object-fit:contain;cursor:none}
-#h{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);color:#fff;background:#000a;padding:10px 18px;border-radius:24px;font:600 15px -apple-system,sans-serif;transition:opacity .6s}</style></head>
-<body><canvas id="c" width="${W}" height="${H}"></canvas><div id="h">ダブルクリック／Fキーで全画面（Escで戻る）</div>
-<script>
-const c=document.getElementById('c');
-function fs(){ if(document.fullscreenElement||document.webkitFullscreenElement) (document.exitFullscreen||document.webkitExitFullscreen).call(document); else (c.requestFullscreen||c.webkitRequestFullscreen).call(c); }
-c.ondblclick=fs; document.onkeydown=e=>{ if(e.key==='f'||e.key==='F') fs(); };
-setTimeout(()=>document.getElementById('h').style.opacity=0,4000);
-<\/script></body></html>`);
-  disp.document.close();
-  setTimeout(mirrorDisplay, 50);
   toast('表示用ウィンドウを開きました。プロジェクター側へ移動してダブルクリックで全画面');
 };
-window.addEventListener('beforeunload', () => { if (disp && !disp.closed) disp.close(); });
+// 他のタブ・表示用ウィンドウからの知らせ
+function applyLocal(st) {
+  const keep = { bg: state.settings.bg, overlay: state.settings.overlay, logo: state.settings.logo, assetVer: state.settings.assetVer };
+  state = ensureLos(st); Object.assign(state.settings, keep);
+  if (!state.sections[cur]) cur = 'mens';
+  if (DISPLAY) return render();
+  const a = document.activeElement;
+  if (a && a.tagName === 'INPUT' && a.type === 'text' && a.closest('#p-players, #p-design')) { buildTabs(); buildMatches(); }
+  else buildUI();
+  render();
+}
+if (BC) BC.onmessage = e => {
+  const m = e.data; if (!m || m.from === TAB_ID || !state) return;
+  if (m.type === 'hello' && !DISPLAY) bcSend({ type: 'state', state });
+  if (m.type === 'state' && m.state && m.state.sections) { if (DISPLAY && m.view && m.state.sections[m.view]) cur = m.view; applyLocal(m.state); }
+  if (m.type === 'view' && DISPLAY && state.sections[m.view]) { cur = m.view; render(); }
+};
 
 let pickCb;
 function pickFile(cb) { pickCb = cb; $('filePick').value = ''; $('filePick').click(); }
@@ -718,7 +736,7 @@ $('italic').onchange = e => { state.settings.italic = e.target.checked; changed(
 $('dimLosers').onchange = e => { state.settings.dimLosers = e.target.checked; changed(); };
 $('showTitle').onchange = e => { state.settings.showTitle = e.target.checked; changed(); };
 $('titleTop').oninput = e => { state.settings[isLos() ? 'losTitleTop' : 'titleTop'] = e.target.value; save(); render(); };
-document.querySelectorAll('#modeTabs button').forEach(b => b.onclick = () => { if (b.dataset.m === mode) return; lastCur[mode] = cur; mode = b.dataset.m; cur = state.sections[lastCur[mode]] ? lastCur[mode] : keysOfMode(mode)[0]; buildUI(); render(); });
+document.querySelectorAll('#modeTabs button').forEach(b => b.onclick = () => { if (b.dataset.m === mode) return; lastCur[mode] = cur; mode = b.dataset.m; cur = state.sections[lastCur[mode]] ? lastCur[mode] : keysOfMode(mode)[0]; buildUI(); render(); sendView(); });
 $('titleMain').oninput = e => { state.settings.titleMain = e.target.value; save(); render(); };
 $('titleSub').oninput = e => { sec().sub = e.target.value; save(); render(); };
 document.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => pickFile(async f => {
@@ -768,7 +786,7 @@ function hashStr(s) { let a = 0x811c9dc5, b = 7; for (let i = 0; i < s.length; i
 const photoKey = url => defPhotos().get(url) || ('u' + hashStr(url));
 function toRemote() {
   const sections = {};
-  for (const [k, S] of Object.entries(state.sections)) sections[k] = { label: S.label, sub: S.sub, winners: S.winners || {},
+  for (const [k, S] of Object.entries(state.sections)) sections[k] = { label: S.label, sub: S.sub, winners: S.winners || {}, ...(S.kind ? { kind: S.kind } : {}),
     players: S.players.map(p => ({ name: p.name || '', photo: p.photo ? photoKey(p.photo) : null, scale: p.scale ?? 1, dx: p.dx ?? 0, dy: p.dy ?? 0 })) };
   const { bg, overlay, logo, assetVer, ...settings } = state.settings;
   return { sections, settings };
@@ -787,7 +805,7 @@ function schedulePush() {
   SYNC.timer = setTimeout(() => pushRemote().catch(e => { console.error(e); toast('共有に送れませんでした。通信を確認してください'); }), 400);
 }
 async function pushRemote() {
-  if (!SYNC.on || !SYNC.editor) return;
+  if (DISPLAY || !SYNC.on || !SYNC.editor) return;
   const r = toRemote(), json = stable(r);
   if (json === SYNC.lastJson) return;
   for (const S of Object.values(state.sections)) for (const p of S.players) if (p.photo) {
@@ -806,6 +824,7 @@ async function applyRemote(d) {
   const keep = { bg: state.settings.bg, overlay: state.settings.overlay, logo: state.settings.logo, assetVer: state.settings.assetVer };
   state.sections = next.sections; state.settings = { ...next.settings, ...keep }; ensureLos(state);
   if (!state.sections[cur]) cur = Object.keys(state.sections)[0];
+  if (DISPLAY) return render();
   DB.set(state);
   const a = document.activeElement;
   if (a && a.tagName === 'INPUT' && a.type === 'text' && a.closest('#p-players, #p-design')) { buildTabs(); buildMatches(); }
@@ -852,7 +871,7 @@ async function startSync() {
   SYNC.db = fs.getFirestore(a);
   const cred = await auth.signInAnonymously(auth.getAuth(a));
   SYNC.uid = cred.user.uid; SYNC.on = true;
-  SYNC.editor = await tryEditor();
+  SYNC.editor = DISPLAY ? false : await tryEditor();
   updateSyncUI();
   $('syncBtn').onclick = () => editorLogin().catch(e => { console.error(e); toast('通信エラー'); });
   $('changePw').onclick = () => changePassword().catch(e => { console.error(e); toast('変更できませんでした'); });
@@ -871,9 +890,16 @@ async function startSync() {
   for (const k of ['bg', 'logo']) if (!state.settings[k] || state.settings.assetVer !== window.DEFAULT_DATA.settings.assetVer) state.settings[k] = window.DEFAULT_DATA.settings[k];
   state.settings.assetVer = window.DEFAULT_DATA.settings.assetVer;
   for (const S of Object.values(state.sections)) for (const p of S.players) if (p.name === 'まさまさまっと') p.name = 'まさまさまっど';
+  if (!state.sections[cur]) cur = 'mens';
+  if (DISPLAY) {
+    document.body.classList.add('display'); document.title = "ONE'S トーナメント表示";
+    const h = document.createElement('div'); h.id = 'dispHint'; h.textContent = 'ダブルクリック／Fキーで全画面（Escで戻る）'; document.body.appendChild(h);
+    setTimeout(() => h.style.opacity = 0, 4000);
+  }
   buildUI();
   try { await loadEmbedFonts(); } catch (e) { console.error(e); }
   render();
+  if (DISPLAY) bcSend({ type: 'hello' });
   startSync().catch(e => { console.error(e); toast('共有に接続できませんでした（この端末だけで動きます）'); });
 })();
 </script>
