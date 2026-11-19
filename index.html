@@ -205,10 +205,10 @@ const DB = {
 let saveTimer;
 function save() {
   if (DISPLAY) return;
-  clearTimeout(saveTimer); saveTimer = setTimeout(() => { DB.set(state); bcSend({ type: 'state', state, view: cur }); }, 300); schedulePush();
+  clearTimeout(saveTimer); saveTimer = setTimeout(() => { DB.set(state); bcSend({ type: 'state', state, view: cur }); pushView(); }, 300); schedulePush();
 }
 // 表示用ウィンドウに今の部門を知らせる
-const sendView = () => { if (!DISPLAY) bcSend({ type: 'view', view: cur }); };
+const sendView = () => { if (!DISPLAY) { bcSend({ type: 'view', view: cur }); pushView(); } };
 
 // ====== トーナメントの形 ======
 // 各ブロック：m1=2v3 → m2=1 v W(m1)、m3=4v5 → m4=W(m3) v 6、m5=W(m2) v W(m4)、F=決勝
@@ -771,7 +771,7 @@ $('resetWin').onclick = () => { if (confirm(`${sec().label} の勝敗をすべ�
 $('resetAll').onclick = () => { if (confirm('選手・写真・勝敗・デザインをすべて初期データに戻しますか？（元に戻せません）')) { state = ensureLos(clone(window.DEFAULT_DATA)); cur = 'mens'; changed(true); } };
 
 // ====== 端末間の共有（ネット版で data/config.js がある時だけ） ======
-const SYNC = { on: false, editor: false, db: null, uid: null, lastJson: null, remoteExists: null, photos: new Map(), timer: null };
+const SYNC = { remoteView: null, viewInit: false, on: false, editor: false, db: null, uid: null, lastJson: null, remoteExists: null, photos: new Map(), timer: null };
 let FS = null;
 const FB_VER = '10.12.2';
 const stable = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
@@ -803,6 +803,12 @@ function schedulePush() {
   if (!SYNC.on || !SYNC.editor) return;
   clearTimeout(SYNC.timer);
   SYNC.timer = setTimeout(() => pushRemote().catch(e => { console.error(e); toast('共有に送れませんでした。通信を確認してください'); }), 400);
+}
+// 表示用ウィンドウの部門を他のPCにも伝える（state/view）
+function pushView() {
+  if (DISPLAY || !SYNC.on || !SYNC.editor || SYNC.remoteView === cur) return;
+  SYNC.remoteView = cur;
+  FS.setDoc(FS.doc(SYNC.db, 'state', 'view'), { key: cur, at: FS.serverTimestamp() }).catch(console.error);
 }
 async function pushRemote() {
   if (DISPLAY || !SYNC.on || !SYNC.editor) return;
@@ -881,6 +887,13 @@ async function startSync() {
     SYNC.remoteExists = true;
     applyRemote(snap.data()).catch(console.error);
   }, err => { console.error(err); toast('共有データに接続できません'); });
+  fs.onSnapshot(fs.doc(SYNC.db, 'state', 'view'), snap => {
+    const k = snap.exists() ? snap.data().key : null;
+    SYNC.remoteView = k;
+    const first = !SYNC.viewInit; SYNC.viewInit = true;
+    // 開いた直後は URL の部門のまま。その後どのPCで部門を変えても表示が付いていく
+    if (DISPLAY && !first && k && state.sections[k] && k !== cur) { cur = k; render(); }
+  }, console.error);
 }
 
 (async () => {
