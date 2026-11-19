@@ -11,6 +11,10 @@
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 -apple-system, "Hiragino Sans", sans-serif; }
   .app { display:grid; grid-template-columns: 460px 1fr; height:100vh; }
   .side { overflow-y:auto; border-right:1px solid var(--line); background:var(--panel); }
+  .sync { display:none; margin:-2px 0 10px; padding:7px 10px; border-radius:8px; font-size:12px; font-weight:700; cursor:pointer; border:1px solid var(--line); background:#0f1115; color:var(--sub); text-align:left; width:100%; }
+  .sync.on { display:block; }
+  .sync.edit { color:#9dffa0; border-color:#2f6d2f; }
+  .readonly #p-players, .readonly #p-results, .readonly #p-design, .readonly #resetWin, .readonly #resetAll, .readonly #loadJson { pointer-events:none; opacity:.45; }
   .view { overflow:auto; padding:20px; display:flex; justify-content:center; align-items:flex-start; }
   #cv { width:min(100%, calc((100vh - 40px) * 16 / 9)); height:auto; box-shadow:0 6px 30px #0008; background:#000; }
   header { position:sticky; top:0; z-index:5; background:var(--panel); padding:12px 14px 0; border-bottom:1px solid var(--line); }
@@ -64,6 +68,7 @@
 <div class="app">
   <aside class="side">
     <header>
+      <button class="sync" id="syncBtn"></button>
       <div class="hrow"><h1>ONE'S FINAL トーナメント作成</h1>
         <button class="btn small" id="fsBtn" title="この画面で全画面（Fキー／表をダブルクリックでも可。Escで戻る）">⛶ 全画面</button>
         <button class="btn small" id="dispBtn" title="プロジェクター等に出す別ウィンドウを開く">表示用ウィンドウ</button></div>
@@ -124,6 +129,11 @@
         <button class="btn danger" id="resetWin">この部門の勝敗を全部消す</button>
         <button class="btn danger" id="resetAll">すべて初期データに戻す</button>
       </div>
+      <div id="pwBox" style="display:none">
+        <h2>共有（ネット版）</h2>
+        <p class="hint">編集パスワードを変えると、ほかの端末はもう一度新しいパスワードの入力が必要になります。</p>
+        <button class="btn" id="changePw">編集パスワードを変更</button>
+      </div>
     </section>
   </aside>
   <main class="view"><canvas id="cv" width="1920" height="1080"></canvas></main>
@@ -134,6 +144,7 @@
 
 <script src="data/default_data.js"></script>
 <script src="data/fonts.js"></script>
+<script src="data/config.js"></script>
 <script>
 'use strict';
 // ====== 定数（キャンバス 1920×1080） ======
@@ -175,7 +186,7 @@ const DB = {
   },
 };
 let saveTimer;
-function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => DB.set(state), 300); }
+function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => DB.set(state), 300); schedulePush(); }
 
 // ====== トーナメントの形 ======
 // 各ブロック：m1=2v3 → m2=1 v W(m1)、m3=4v5 → m4=W(m3) v 6、m5=W(m2) v W(m4)、F=決勝
@@ -460,7 +471,7 @@ function buildPlayers() {
   for (const [el, from] of [[$('listL'), 0], [$('listR'), 6]]) {
     el.innerHTML = '';
     for (let i = from; i < from + 6; i++) {
-      const p = S.players[i], los = LOS_SLOTS.includes(i);
+      const p = S.players[i], los = LOS_SLOTS.includes(i), P = () => sec().players[i];
       const c = document.createElement('div'); c.className = 'card' + (los ? ' los' : '');
       c.innerHTML = `
         <div class="row">
@@ -479,14 +490,14 @@ function buildPlayers() {
       const th = c.querySelector('.thumb'); th.style.backgroundImage = p.photo ? `url(${p.photo})` : '';
       if (!p.photo) th.textContent = '';
       const inp = c.querySelector('input[type=text]'); inp.value = p.name;
-      inp.oninput = () => { p.name = inp.value; save(); render(); buildMatches(); };
+      inp.oninput = () => { P().name = inp.value; save(); render(); buildMatches(); };
       c.querySelectorAll('input[type=range]').forEach(r => { r.value = p[r.dataset.k] ?? (r.dataset.k === 'scale' ? 1 : 0);
-        r.oninput = () => { p[r.dataset.k] = +r.value; save(); render(); }; });
-      const pick = () => pickFile(async f => { p.photo = await processPhoto(f); changed(true); toast('写真を入れました'); });
+        r.oninput = () => { P()[r.dataset.k] = +r.value; save(); render(); }; });
+      const pick = () => pickFile(async f => { P().photo = await processPhoto(f); changed(true); toast('写真を入れました'); });
       th.onclick = pick;
       c.querySelector('[data-a=pick]').onclick = pick;
-      c.querySelector('[data-a=rm]').onclick = () => { p.photo = null; changed(true); };
-      c.querySelector('[data-a=resetAdj]').onclick = () => { p.scale = 1; p.dx = 0; p.dy = 0; changed(true); };
+      c.querySelector('[data-a=rm]').onclick = () => { P().photo = null; changed(true); };
+      c.querySelector('[data-a=resetAdj]').onclick = () => { Object.assign(P(), { scale: 1, dx: 0, dy: 0 }); changed(true); };
       c.querySelector('[data-a=adj]').onclick = () => c.classList.toggle('open');
       el.appendChild(c);
     }
@@ -617,6 +628,118 @@ $('jsonPick').onchange = async e => {
 $('resetWin').onclick = () => { if (confirm(`${sec().label} の勝敗をすべて消しますか？`)) { sec().winners = {}; changed(); } };
 $('resetAll').onclick = () => { if (confirm('選手・写真・勝敗・デザインをすべて初期データに戻しますか？（元に戻せません）')) { state = clone(window.DEFAULT_DATA); changed(true); } };
 
+// ====== 端末間の共有（ネット版で data/config.js がある時だけ） ======
+const SYNC = { on: false, editor: false, db: null, uid: null, lastJson: null, remoteExists: null, photos: new Map(), timer: null };
+let FS = null;
+const FB_VER = '10.12.2';
+const stable = o => JSON.stringify(o, (k, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).sort().reduce((a, x) => (a[x] = v[x], a), {}) : v);
+let DEF_PHOTO = null;
+function defPhotos() {
+  if (DEF_PHOTO) return DEF_PHOTO;
+  DEF_PHOTO = new Map();
+  for (const [k, S] of Object.entries(window.DEFAULT_DATA.sections)) S.players.forEach((p, i) => { if (p.photo) DEF_PHOTO.set(p.photo, `def:${k}:${i}`); });
+  return DEF_PHOTO;
+}
+function hashStr(s) { let a = 0x811c9dc5, b = 7; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); a = Math.imul(a ^ c, 16777619); b = (Math.imul(b, 31) + c) | 0; } return (a >>> 0).toString(36) + (b >>> 0).toString(36) + s.length.toString(36); }
+const photoKey = url => defPhotos().get(url) || ('u' + hashStr(url));
+function toRemote() {
+  const sections = {};
+  for (const [k, S] of Object.entries(state.sections)) sections[k] = { label: S.label, sub: S.sub, winners: S.winners || {},
+    players: S.players.map(p => ({ name: p.name || '', photo: p.photo ? photoKey(p.photo) : null, scale: p.scale ?? 1, dx: p.dx ?? 0, dy: p.dy ?? 0 })) };
+  const { bg, overlay, logo, assetVer, ...settings } = state.settings;
+  return { sections, settings };
+}
+async function resolvePhoto(id) {
+  if (!id) return null;
+  if (id.startsWith('def:')) { const [, k, i] = id.split(':'); return window.DEFAULT_DATA.sections[k]?.players[+i]?.photo || null; }
+  if (SYNC.photos.has(id)) return SYNC.photos.get(id);
+  const snap = await FS.getDoc(FS.doc(SYNC.db, 'photos', id));
+  const url = snap.exists() ? snap.data().data : null;
+  SYNC.photos.set(id, url); return url;
+}
+function schedulePush() {
+  if (!SYNC.on || !SYNC.editor) return;
+  clearTimeout(SYNC.timer);
+  SYNC.timer = setTimeout(() => pushRemote().catch(e => { console.error(e); toast('共有に送れませんでした。通信を確認してください'); }), 400);
+}
+async function pushRemote() {
+  if (!SYNC.on || !SYNC.editor) return;
+  const r = toRemote(), json = stable(r);
+  if (json === SYNC.lastJson) return;
+  for (const S of Object.values(state.sections)) for (const p of S.players) if (p.photo) {
+    const id = photoKey(p.photo);
+    if (id.startsWith('u') && !SYNC.photos.has(id)) { await FS.setDoc(FS.doc(SYNC.db, 'photos', id), { data: p.photo }); SYNC.photos.set(id, p.photo); }
+  }
+  SYNC.lastJson = json;
+  await FS.setDoc(FS.doc(SYNC.db, 'state', 'main'), { ...r, updatedAt: FS.serverTimestamp() });
+}
+async function applyRemote(d) {
+  const r = { sections: d.sections, settings: d.settings || {} }, json = stable(r);
+  if (json === SYNC.lastJson) return;
+  const next = JSON.parse(JSON.stringify(r));
+  for (const S of Object.values(next.sections)) for (const p of S.players) p.photo = await resolvePhoto(p.photo);
+  SYNC.lastJson = json;
+  const keep = { bg: state.settings.bg, overlay: state.settings.overlay, logo: state.settings.logo, assetVer: state.settings.assetVer };
+  state.sections = next.sections; state.settings = { ...next.settings, ...keep };
+  if (!state.sections[cur]) cur = Object.keys(state.sections)[0];
+  DB.set(state);
+  const a = document.activeElement;
+  if (a && a.tagName === 'INPUT' && a.type === 'text' && a.closest('#p-players, #p-design')) { buildTabs(); buildMatches(); }
+  else buildUI();
+  render();
+}
+function updateSyncUI() {
+  const b = $('syncBtn');
+  b.classList.toggle('on', SYNC.on); b.classList.toggle('edit', SYNC.editor);
+  b.textContent = SYNC.editor ? '● 共有中：編集できます（入力はすべての端末に反映）' : '👁 閲覧のみ：ここを押して編集パスワードを入力';
+  document.querySelector('.side').classList.toggle('readonly', SYNC.on && !SYNC.editor);
+  $('pwBox').style.display = SYNC.on && SYNC.editor ? '' : 'none';
+}
+async function tryEditor() {
+  try { await FS.setDoc(FS.doc(SYNC.db, 'checks', SYNC.uid), { t: FS.serverTimestamp() }); return true; } catch (e) { return false; }
+}
+async function editorLogin() {
+  if (SYNC.editor) { if (confirm('この端末の編集モードを終了しますか？（閲覧のみになります）')) { await FS.deleteDoc(FS.doc(SYNC.db, 'sessions', SYNC.uid)).catch(() => {}); SYNC.editor = false; updateSyncUI(); } return; }
+  const pw = prompt('編集パスワードを入力してください\n（まだ決めていない場合は、ここで入れたものが編集パスワードになります）');
+  if (!pw) return;
+  await FS.setDoc(FS.doc(SYNC.db, 'sessions', SYNC.uid), { pw });
+  let ok = await tryEditor(), first = false;
+  if (!ok) { try { await FS.setDoc(FS.doc(SYNC.db, 'secret', 'main'), { pw }); first = true; ok = await tryEditor(); } catch (e) {} }
+  if (!ok) { await FS.deleteDoc(FS.doc(SYNC.db, 'sessions', SYNC.uid)).catch(() => {}); toast('パスワードが違います'); return; }
+  SYNC.editor = true; updateSyncUI();
+  if (SYNC.remoteExists === false) await pushRemote();
+  toast(first ? '編集パスワードを設定しました' : '編集モードになりました');
+}
+async function changePassword() {
+  const pw = prompt('新しい編集パスワード（4文字以上）'); if (!pw) return;
+  if (pw.length < 4) { toast('4文字以上にしてください'); return; }
+  if (prompt('確認のため、もう一度入力してください') !== pw) { toast('一致しませんでした'); return; }
+  await FS.setDoc(FS.doc(SYNC.db, 'secret', 'main'), { pw });
+  await FS.setDoc(FS.doc(SYNC.db, 'sessions', SYNC.uid), { pw });
+  toast('編集パスワードを変更しました');
+}
+async function startSync() {
+  const cfg = window.FIREBASE_CONFIG;
+  if (!cfg || !/^https?:$/.test(location.protocol)) return;
+  const B = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
+  const [app, auth, fs] = await Promise.all([import(B + 'firebase-app.js'), import(B + 'firebase-auth.js'), import(B + 'firebase-firestore.js')]);
+  FS = fs;
+  const a = app.initializeApp(cfg);
+  SYNC.db = fs.getFirestore(a);
+  const cred = await auth.signInAnonymously(auth.getAuth(a));
+  SYNC.uid = cred.user.uid; SYNC.on = true;
+  SYNC.editor = await tryEditor();
+  updateSyncUI();
+  $('syncBtn').onclick = () => editorLogin().catch(e => { console.error(e); toast('通信エラー'); });
+  $('changePw').onclick = () => changePassword().catch(e => { console.error(e); toast('変更できませんでした'); });
+  fs.onSnapshot(fs.doc(SYNC.db, 'state', 'main'), snap => {
+    if (snap.metadata.hasPendingWrites) return;
+    if (!snap.exists()) { SYNC.remoteExists = false; if (SYNC.editor) pushRemote().catch(console.error); return; }
+    SYNC.remoteExists = true;
+    applyRemote(snap.data()).catch(console.error);
+  }, err => { console.error(err); toast('共有データに接続できません'); });
+}
+
 (async () => {
   const saved = await DB.get();
   state = saved && saved.sections ? saved : clone(window.DEFAULT_DATA);
@@ -625,8 +748,9 @@ $('resetAll').onclick = () => { if (confirm('選手・写真・勝敗・デザ�
   state.settings.assetVer = window.DEFAULT_DATA.settings.assetVer;
   for (const S of Object.values(state.sections)) for (const p of S.players) if (p.name === 'まさまさまっと') p.name = 'まさまさまっど';
   buildUI();
-  try { await loadEmbedFonts(); await document.fonts.load(`bold 60px 'DIN Condensed'`); } catch (e) { console.error(e); }
+  try { await loadEmbedFonts(); } catch (e) { console.error(e); }
   render();
+  startSync().catch(e => { console.error(e); toast('共有に接続できませんでした（この端末だけで動きます）'); });
 })();
 </script>
 </body>
