@@ -24,6 +24,9 @@
   #cv:fullscreen { width:100vw; height:100vh; object-fit:contain; background:#000; box-shadow:none; }
   #cv:-webkit-full-screen { width:100vw; height:100vh; object-fit:contain; background:#000; }
   #cv { cursor:zoom-in; }
+  .modes { display:flex; gap:4px; margin-bottom:10px; background:#0f1115; padding:4px; border-radius:10px; border:1px solid var(--line); }
+  .modes button { flex:1; padding:7px 4px; border:none; border-radius:7px; background:transparent; color:var(--sub); font-weight:700; cursor:pointer; font-size:12px; }
+  .modes button.on { background:#fff; color:#111; }
   .tabs { display:flex; gap:6px; }
   .tabs button { flex:1; padding:9px; border:1px solid var(--line); border-bottom:none; border-radius:8px 8px 0 0; background:transparent; color:var(--sub); font-weight:700; cursor:pointer; font-size:14px; }
   .tabs button.on { background:var(--bg); color:#fff; }
@@ -72,6 +75,7 @@
       <div class="hrow"><h1>ONE'S FINAL トーナメント作成</h1>
         <button class="btn small" id="fsBtn" title="この画面で全画面（Fキー／表をダブルクリックでも可。Escで戻る）">⛶ 全画面</button>
         <button class="btn small" id="dispBtn" title="プロジェクター等に出す別ウィンドウを開く">表示用ウィンドウ</button></div>
+      <div class="modes" id="modeTabs"><button data-m="final">FINAL（本戦 12名）</button><button data-m="los">LAST ONE'S SELECTION（8名）</button></div>
       <div class="tabs" id="secTabs"></div>
     </header>
     <div class="subtabs" id="paneTabs">
@@ -107,7 +111,7 @@
       <div class="field"><span>前面画像</span><button class="btn" data-pick="overlay">選択</button><button class="btn danger small" data-clear="overlay">外す</button><span id="overlayState" class="hint"></span></div>
       <h2>タイトル文字</h2>
       <div class="field"><span>表示</span><label><input type="checkbox" id="showTitle"> タイトルを描く</label></div>
-      <div class="field"><span>1行目（共通）</span><input type="text" id="titleTop"></div>
+      <div class="field"><span id="titleTopLabel">1行目（共通）</span><input type="text" id="titleTop"></div>
       <div class="field"><span>2行目（共通）</span><input type="text" id="titleMain"></div>
       <div class="field"><span>3行目（この部門）</span><input type="text" id="titleSub"></div>
     </section>
@@ -234,7 +238,95 @@ function eliminated(S) {
   }
   return out;
 }
-const isLosEmpty = (S, i) => LOS_SLOTS.includes(i) && !S.players[i].name.trim();
+const isLosEmpty = (S, i) => S.kind !== 'los' && LOS_SLOTS.includes(i) && !S.players[i].name.trim();
+
+// ====== LAST ONE'S SELECTION（8名・決勝＋3位決定戦で1〜4位） ======
+const LOS_ROW_Y = [120, 260, 470, 610];
+const RANK_ROW_H = 56, RANK_GAP = 8;
+function buildLosTree() {
+  const T = {};
+  for (const s of ['L', 'R']) {
+    const off = s === 'L' ? 0 : 4;
+    const mx = x => s === 'L' ? x : W - x;
+    const slot = r => ({ type: 'slot', idx: off + r, out: [mx(LX + BOX_W), LOS_ROW_Y[r] + BOX_H / 2] });
+    const m = (id, x, a, b, round) => {
+      const y = (a.out[1] + b.out[1]) / 2;
+      return T[s + id] = { type: 'match', id: s + id, x: mx(x), kids: [a, b], out: [mx(x), y], round, side: s };
+    };
+    const m1 = m(1, 525, slot(0), slot(1), 1);
+    const m2 = m(2, 525, slot(2), slot(3), 1);
+    m(3, 600, m1, m2, 2);
+  }
+  const fy = T.L3.out[1];
+  T.F = { type: 'final', id: 'F', kids: [T.L3, T.R3], round: 4, out: [W / 2, fy], top: fy - 34 };
+  T.T = { type: 'third', id: 'T', kids: [T.L3, T.R3], round: 3 };
+  return T;
+}
+const LOS_TREE = buildLosTree();
+const LOS_ORDER = [
+  ['1回戦', ['L1', 'L2', 'R1', 'R2']],
+  ['準決勝', ['L3', 'R3']],
+  ['3位決定戦', ['T']],
+  ['決勝', ['F']],
+];
+const LOS_PARENTS = { L1: ['L3'], L2: ['L3'], R1: ['R3'], R2: ['R3'], L3: ['F', 'T'], R3: ['F', 'T'] };
+const isLos = (S = sec()) => S && S.kind === 'los';
+const treeOf = S => isLos(S) ? LOS_TREE : TREE;
+function loserOf(node, S) { const w = S.winners[node.id]; return w === undefined ? null : entrant(node.kids[1 - w], S); }
+// 試合に出る2人（3位決定戦は準決勝の負け）
+function matchEntrants(n, S) { return n.type === 'third' ? n.kids.map(k => loserOf(k, S)) : n.kids.map(k => entrant(k, S)); }
+function losRanks(S) {
+  const F = LOS_TREE.F, T = LOS_TREE.T, r = [null, null, null, null];
+  if (S.winners.F !== undefined) { r[0] = entrant(F, S); r[1] = loserOf(F, S); }
+  if (S.winners.T !== undefined) { const e = matchEntrants(T, S); r[2] = e[S.winners.T]; r[3] = e[1 - S.winners.T]; }
+  return r;
+}
+function newLosSection(label) {
+  return { label, sub: `${label} SECTION`, kind: 'los', winners: {}, players: Array.from({ length: 8 }, () => ({ name: '', photo: null, scale: 1, dx: 0, dy: 0 })) };
+}
+function ensureLos(st) {
+  if (!st.sections.los_mens) st.sections.los_mens = newLosSection("MEN'S");
+  if (!st.sections.los_womens) st.sections.los_womens = newLosSection("WOMEN'S");
+  if (st.settings.losTitleTop === undefined) st.settings.losTitleTop = "LAST ONE'S SELECTION";
+  return st;
+}
+let mode = 'final';
+const lastCur = { final: 'mens', los: 'los_mens' };
+const keysOfMode = m => Object.keys(state.sections).filter(k => (state.sections[k].kind === 'los') === (m === 'los'));
+function losRect(i) { return { x: i < 4 ? LX : RX, y: LOS_ROW_Y[i % 4], w: BOX_W, h: BOX_H, left: i < 4 }; }
+function thirdRect(j) { return { x: j === 0 ? LX : RX, y: 836, w: BOX_W, h: BOX_H, left: j === 0 }; }
+function rankRect(k) { const y0 = LOS_TREE.F.top - (RANK_ROW_H * 4 + RANK_GAP * 3); return { x: W / 2 - BOX_W / 2, y: y0 + k * (RANK_ROW_H + RANK_GAP), w: BOX_W, h: RANK_ROW_H, left: true }; }
+function drawLos(g, S, st) {
+  drawLines(g, S, st, LOS_TREE);
+  // 1回戦で負けた人だけ暗く（準決勝の負けは3位決定戦へ）
+  const out = new Set();
+  if (st.dimLosers) for (const k of ['L1', 'L2', 'R1', 'R2']) { const l = loserOf(LOS_TREE[k], S); if (l !== null) out.add(l); }
+  for (let i = 0; i < 8; i++) drawBox(g, S, i, null, out.has(i), losRect(i));
+  // 3位決定戦
+  const te = matchEntrants(LOS_TREE.T, S), tw = S.winners.T;
+  for (let j = 0; j < 2; j++) {
+    const b = thirdRect(j), e = te[j];
+    g.save(); g.font = `bold 34px ${FONT}`; g.fillStyle = '#fff'; g.textAlign = b.left ? 'left' : 'right';
+    g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 8;
+    g.translate(b.left ? b.x + 4 : b.x + b.w - 4, b.y - 14); italic(g); g.fillText('3RD PLACE MATCH', 0, 0); g.restore();
+    if (e === null) { g.save(); g.fillStyle = 'rgba(8,10,18,.6)'; g.fillRect(b.x, b.y, b.w, b.h); g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 3; g.strokeRect(b.x + 1.5, b.y + 1.5, b.w - 3, b.h - 3); g.restore(); }
+    else drawBox(g, S, e, null, st.dimLosers && tw !== undefined && tw !== j, b, tw === j ? st.winColor : null);
+  }
+  // 1〜4位
+  if (st.showChamp !== false) {
+    const ranks = losRanks(S), labels = ['1ST', '2ND', '3RD', '4TH'];
+    for (let k = 0; k < 4; k++) {
+      const b = rankRect(k), i = ranks[k];
+      g.save();
+      g.fillStyle = 'rgba(8,10,18,.85)'; g.fillRect(b.x, b.y, b.w, b.h);
+      g.strokeStyle = i !== null ? st.winColor : 'rgba(255,255,255,.55)'; g.lineWidth = 3; g.strokeRect(b.x + 1.5, b.y + 1.5, b.w - 3, b.h - 3);
+      g.font = `bold 40px ${FONT}`; g.fillStyle = st.winColor; g.textAlign = 'left';
+      g.translate(b.x + 18, b.y + b.h / 2 + capH(g, 40) / 2); italic(g); g.fillText(labels[k], 0, 0);
+      g.restore();
+      if (i !== null) drawName(g, S.players[i].name, { ...b, x: b.x + 96, w: b.w - 96 }, 46, 230);
+    }
+  }
+}
 
 // ====== 画像 ======
 function loadImg(src) {
@@ -283,13 +375,16 @@ async function render(target = ctx, secKey = cur) {
   g.save(); g.clearRect(0, 0, W, H);
   // 背景
   if (bg) drawCover(g, bg); else placeholderBg(g);
+  if (isLos(S)) drawLos(g, S, st);
+  else {
   // 線
   drawLines(g, S, st);
   // 枠
   const out = st.dimLosers ? eliminated(S) : new Set();
   for (let i = 0; i < 12; i++) drawBox(g, S, i, photos[i], out.has(i));
+  }
   // 優勝者
-  const champ = entrant(TREE.F, S);
+  const champ = isLos(S) ? null : entrant(TREE.F, S);
   if (champ !== null && st.showChamp !== false) {
     const cb = champRect();
     drawBox(g, S, champ, photos[champ], false, cb, st.winColor);
@@ -322,10 +417,11 @@ function placeholderBg(g) {
   g.fillText('（背景画像は「デザイン」タブから設定）', W / 2, H - 40);
 }
 function seg(g, x1, y1, x2, y2) { g.moveTo(x1, y1); g.lineTo(x2, y2); }
-function drawLines(g, S, st) {
+function drawLines(g, S, st, T = TREE) {
   const base = [], win = [];
-  for (const k in TREE) {
-    const n = TREE[k], w = S.winners[k];
+  for (const k in T) {
+    const n = T[k], w = S.winners[k];
+    if (n.type === 'third') continue;
     if (n.type === 'final') {
       n.kids.forEach((c, i) => (w === i ? win : base).push([c.out[0], c.out[1], n.out[0], n.out[1]]));
       (w !== undefined ? win : base).push([n.out[0], n.out[1], n.out[0], n.top]);
@@ -403,20 +499,19 @@ async function loadEmbedFonts() {
   }
 }
 function capH(g, fs) { const m = g.measureText('H'); return m.actualBoundingBoxAscent || fs * 0.72; }
-function drawName(g, name, b) {
+function drawName(g, name, b, baseFs = 62, maxW = 250) {
   name = (name || '').trim(); if (!name) return;
-  const maxW = 250;
   const fit = (t, fs) => { g.font = `bold ${fs}px ${FONT}`; return g.measureText(t).width; };
   let lines, fs;
-  if (name.includes('/')) { lines = name.split('/').map(s => s.trim()).filter(Boolean).slice(0, 2); fs = lines.length > 1 ? 47 : 62; }
+  if (name.includes('/')) { lines = name.split('/').map(s => s.trim()).filter(Boolean).slice(0, 2); fs = lines.length > 1 ? Math.round(baseFs * 0.76) : baseFs; }
   else {
-    lines = [name]; fs = 62;
-    while (fs > 50 && fit(name, fs) > maxW) fs -= 2;
+    lines = [name]; fs = baseFs;
+    while (fs > baseFs * 0.8 && fit(name, fs) > maxW) fs -= 2;
     if (fit(name, fs) > maxW && name.includes(' ')) {
       const words = name.split(/\s+/); let best = null;
       for (let k = 1; k < words.length; k++) { const a = words.slice(0, k).join(' '), c = words.slice(k).join(' ');
-        const m = Math.max(fit(a, 47), fit(c, 47)); if (!best || m < best.m) best = { m, l: [a, c] }; }
-      lines = best.l; fs = 47;
+        const m = Math.max(fit(a, Math.round(baseFs * 0.76)), fit(c, Math.round(baseFs * 0.76))); if (!best || m < best.m) best = { m, l: [a, c] }; }
+      lines = best.l; fs = Math.round(baseFs * 0.76);
     }
   }
   g.save();
@@ -446,7 +541,7 @@ function drawTitle(g, st, S) {
     const tw = g.measureText(txt).width; if (tw > 520) g.scale(520 / tw, 1);
     g.fillText(txt, 0, 0); g.restore();
   };
-  t(st.titleTop, 66, 636);
+  t(isLos(S) ? st.losTitleTop : st.titleTop, 66, 636);
   t(st.titleMain, 128, 754);
   t(S.sub, 44, 814);
 }
@@ -458,16 +553,32 @@ function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add
 function changed(full = false) { save(); render(); if (full) buildUI(); else { buildMatches(); } }
 
 function buildTabs() {
+  mode = isLos() ? 'los' : 'final';
+  document.querySelectorAll('#modeTabs button').forEach(b => b.classList.toggle('on', b.dataset.m === mode));
   $('secTabs').innerHTML = '';
-  for (const k of Object.keys(state.sections)) {
+  for (const k of keysOfMode(mode)) {
     const b = document.createElement('button'); b.textContent = state.sections[k].label;
-    b.className = k === cur ? 'on' : ''; b.onclick = () => { cur = k; buildUI(); render(); };
+    b.className = k === cur ? 'on' : ''; b.onclick = () => { cur = k; lastCur[mode] = k; buildUI(); render(); };
     $('secTabs').appendChild(b);
   }
 }
 function slotLabel(i) { const s = i < 6 ? '左' : '右'; return `${s}${(i % 6) + 1}`; }
+function buildLosPlayers() {
+  const S = sec();
+  for (const [el, from] of [[$('listL'), 0], [$('listR'), 4]]) {
+    el.innerHTML = '';
+    for (let i = from; i < from + 4; i++) {
+      const c = document.createElement('div'); c.className = 'card';
+      c.innerHTML = `<div class="row"><span class="num">${i < 4 ? '左' : '右'}${(i % 4) + 1}</span><input type="text" placeholder="選手名"></div>`;
+      const inp = c.querySelector('input'); inp.value = S.players[i].name;
+      inp.oninput = () => { sec().players[i].name = inp.value; save(); render(); buildMatches(); };
+      el.appendChild(c);
+    }
+  }
+}
 function buildPlayers() {
   const S = sec();
+  if (isLos(S)) return buildLosPlayers();
   for (const [el, from] of [[$('listL'), 0], [$('listR'), 6]]) {
     el.innerHTML = '';
     for (let i = from; i < from + 6; i++) {
@@ -508,18 +619,29 @@ function nameOf(i, S = sec()) {
   if (isLosEmpty(S, i)) return null;
   return S.players[i].name.replace(/\//g, ' ').trim() || null;
 }
-function clearUp(id) { const S = sec(); let p = parentOf[id]; while (p) { delete S.winners[p]; p = parentOf[p]; } }
+function clearUp(id) {
+  const S = sec();
+  if (isLos(S)) { const go = k => (LOS_PARENTS[k] || []).forEach(p => { delete S.winners[p]; go(p); }); go(id); return; }
+  let p = parentOf[id]; while (p) { delete S.winners[p]; p = parentOf[p]; }
+}
 function buildMatches() {
   const S = sec(), el = $('matches'); el.innerHTML = '';
   document.documentElement.style.setProperty('--win', state.settings.winColor);
-  const champ = entrant(TREE.F);
-  if (champ !== null) { const d = document.createElement('div'); d.className = 'champ'; d.innerHTML = `🏆 優勝：<b>${nameOf(champ) ?? ''}</b>`; el.appendChild(d); }
-  for (const [title, ids] of MATCH_ORDER) {
+  const T = treeOf(S);
+  if (isLos(S)) {
+    const r = losRanks(S);
+    if (r.some(x => x !== null)) { const d = document.createElement('div'); d.className = 'champ';
+      d.innerHTML = ['1位', '2位', '3位', '4位'].map((l, k) => `${l}：<b>${r[k] !== null ? nameOf(r[k]) : '—'}</b>`).join('　'); el.appendChild(d); }
+  } else {
+    const champ = entrant(TREE.F);
+    if (champ !== null) { const d = document.createElement('div'); d.className = 'champ'; d.innerHTML = `🏆 優勝：<b>${nameOf(champ) ?? ''}</b>`; el.appendChild(d); }
+  }
+  for (const [title, ids] of (isLos(S) ? LOS_ORDER : MATCH_ORDER)) {
     const h = document.createElement('h2'); h.textContent = title; el.appendChild(h);
     for (const id of ids) {
-      const n = TREE[id], w = S.winners[id];
+      const n = T[id], w = S.winners[id];
       const row = document.createElement('div'); row.className = 'match';
-      const ents = n.kids.map(k => entrant(k));
+      const ents = matchEntrants(n, S);
       const names = ents.map(e => e === null ? null : nameOf(e));
       const ready = names.every(Boolean);
       names.forEach((nm, i) => {
@@ -538,7 +660,7 @@ function buildMatches() {
 function buildDesign() {
   const st = state.settings;
   $('winColor').value = st.winColor; $('italic').checked = st.italic !== false; $('showChamp').checked = st.showChamp !== false; $('champLabel').value = st.champLabel ?? 'CHAMPION'; $('dimLosers').checked = st.dimLosers; $('showTitle').checked = st.showTitle;
-  $('titleTop').value = st.titleTop; $('titleMain').value = st.titleMain; $('titleSub').value = sec().sub;
+  $('titleTop').value = isLos() ? st.losTitleTop : st.titleTop; $('titleTopLabel').textContent = isLos() ? '1行目（LOS共通）' : '1行目（本戦共通）'; $('titleMain').value = st.titleMain; $('titleSub').value = sec().sub;
   $('bgState').textContent = st.bg ? '設定済み' : '未設定'; $('overlayState').textContent = st.overlay ? '設定済み' : '未設定';
 }
 function buildUI() { buildTabs(); buildPlayers(); buildMatches(); buildDesign(); }
@@ -594,7 +716,8 @@ $('champLabel').oninput = e => { state.settings.champLabel = e.target.value; sav
 $('italic').onchange = e => { state.settings.italic = e.target.checked; changed(); };
 $('dimLosers').onchange = e => { state.settings.dimLosers = e.target.checked; changed(); };
 $('showTitle').onchange = e => { state.settings.showTitle = e.target.checked; changed(); };
-$('titleTop').oninput = e => { state.settings.titleTop = e.target.value; save(); render(); };
+$('titleTop').oninput = e => { state.settings[isLos() ? 'losTitleTop' : 'titleTop'] = e.target.value; save(); render(); };
+document.querySelectorAll('#modeTabs button').forEach(b => b.onclick = () => { if (b.dataset.m === mode) return; lastCur[mode] = cur; mode = b.dataset.m; cur = state.sections[lastCur[mode]] ? lastCur[mode] : keysOfMode(mode)[0]; buildUI(); render(); });
 $('titleMain').oninput = e => { state.settings.titleMain = e.target.value; save(); render(); };
 $('titleSub').oninput = e => { sec().sub = e.target.value; save(); render(); };
 document.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => pickFile(async f => {
@@ -611,10 +734,10 @@ async function exportSec(k) {
   await render(c.getContext('2d'), k);
   const blob = await new Promise(r => c.toBlob(r, 'image/png'));
   const label = state.sections[k].label.replace(/[^A-Z]/gi, '');
-  download(blob, `ONES_FINAL_TOURNAMENT_${label}.png`);
+  download(blob, state.sections[k].kind === 'los' ? `ONES_LAST_ONES_SELECTION_${label}.png` : `ONES_FINAL_TOURNAMENT_${label}.png`);
 }
 $('exportOne').onclick = async () => { await exportSec(cur); toast('書き出しました'); };
-$('exportAll').onclick = async () => { for (const k of Object.keys(state.sections)) { await exportSec(k); await new Promise(r => setTimeout(r, 400)); } toast('2枚書き出しました'); };
+$('exportAll').onclick = async () => { for (const k of keysOfMode(mode)) { await exportSec(k); await new Promise(r => setTimeout(r, 400)); } toast('2枚書き出しました'); };
 $('saveJson').onclick = () => {
   const d = new Date(), ts = `${d.getMonth() + 1}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
   download(new Blob([JSON.stringify(state)], { type: 'application/json' }), `ONES_tournament_${ts}.json`);
@@ -623,10 +746,10 @@ $('loadJson').onclick = () => { $('jsonPick').value = ''; $('jsonPick').click();
 $('jsonPick').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   try { const d = JSON.parse(await f.text()); if (!d.sections || !d.settings) throw 0;
-    state = d; changed(true); toast('読み込みました'); } catch { toast('読み込めないファイルです'); }
+    state = ensureLos(d); changed(true); toast('読み込みました'); } catch { toast('読み込めないファイルです'); }
 };
 $('resetWin').onclick = () => { if (confirm(`${sec().label} の勝敗をすべて消しますか？`)) { sec().winners = {}; changed(); } };
-$('resetAll').onclick = () => { if (confirm('選手・写真・勝敗・デザインをすべて初期データに戻しますか？（元に戻せません）')) { state = clone(window.DEFAULT_DATA); changed(true); } };
+$('resetAll').onclick = () => { if (confirm('選手・写真・勝敗・デザインをすべて初期データに戻しますか？（元に戻せません）')) { state = ensureLos(clone(window.DEFAULT_DATA)); cur = 'mens'; changed(true); } };
 
 // ====== 端末間の共有（ネット版で data/config.js がある時だけ） ======
 const SYNC = { on: false, editor: false, db: null, uid: null, lastJson: null, remoteExists: null, photos: new Map(), timer: null };
@@ -680,7 +803,7 @@ async function applyRemote(d) {
   for (const S of Object.values(next.sections)) for (const p of S.players) p.photo = await resolvePhoto(p.photo);
   SYNC.lastJson = json;
   const keep = { bg: state.settings.bg, overlay: state.settings.overlay, logo: state.settings.logo, assetVer: state.settings.assetVer };
-  state.sections = next.sections; state.settings = { ...next.settings, ...keep };
+  state.sections = next.sections; state.settings = { ...next.settings, ...keep }; ensureLos(state);
   if (!state.sections[cur]) cur = Object.keys(state.sections)[0];
   DB.set(state);
   const a = document.activeElement;
@@ -742,7 +865,7 @@ async function startSync() {
 
 (async () => {
   const saved = await DB.get();
-  state = saved && saved.sections ? saved : clone(window.DEFAULT_DATA);
+  state = ensureLos(saved && saved.sections ? saved : clone(window.DEFAULT_DATA));
   // 背景・ロゴは初期データのものを使う／名前の修正を反映
   for (const k of ['bg', 'logo']) if (!state.settings[k] || state.settings.assetVer !== window.DEFAULT_DATA.settings.assetVer) state.settings[k] = window.DEFAULT_DATA.settings[k];
   state.settings.assetVer = window.DEFAULT_DATA.settings.assetVer;
