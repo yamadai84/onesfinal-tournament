@@ -292,7 +292,8 @@ function ensureLos(st) {
 }
 let mode = 'final';
 const lastCur = { final: 'mens', los: 'los_mens' };
-const keysOfMode = m => Object.keys(state.sections).filter(k => (state.sections[k].kind === 'los') === (m === 'los'));
+const SEC_ORDER = ['mens', 'womens', 'los_mens', 'los_womens'];
+const keysOfMode = m => Object.keys(state.sections).filter(k => (state.sections[k].kind === 'los') === (m === 'los')).sort((a, b) => (SEC_ORDER.indexOf(a) + 99) % 99 - (SEC_ORDER.indexOf(b) + 99) % 99);
 function losRect(i) { return { x: i < 4 ? LX : RX, y: LOS_ROW_Y[i % 4], w: BOX_W, h: BOX_H, left: i < 4 }; }
 function thirdRect(j) { return { x: j === 0 ? LX : RX, y: 836, w: BOX_W, h: BOX_H, left: j === 0 }; }
 function rankRect(k) { const y0 = LOS_TREE.F.top - (RANK_ROW_H * 4 + RANK_GAP * 3); return { x: W / 2 - BOX_W / 2, y: y0 + k * (RANK_ROW_H + RANK_GAP), w: BOX_W, h: RANK_ROW_H, left: true }; }
@@ -314,7 +315,7 @@ function drawLos(g, S, st) {
   }
   // 1〜4位
   if (st.showChamp !== false) {
-    const ranks = losRanks(S), labels = ['1ST', '2ND', '3RD', '4TH'];
+    const ranks = losRanks(S), labels = ['1st', '2nd', '3rd', '4th'];
     for (let k = 0; k < 4; k++) {
       const b = rankRect(k), i = ranks[k];
       g.save();
